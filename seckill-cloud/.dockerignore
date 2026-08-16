@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+.env
+**/target
+logs
+run
+keys
+ai-service
+sql
+*.log
+*.jtl

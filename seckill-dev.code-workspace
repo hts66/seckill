@@ -1,0 +1,33 @@
+{
+  "folders": [
+    {
+      "name": "Backend",
+      "path": "seckill-cloud"
+    },
+    {
+      "name": "Frontend",
+      "path": "seckill-frontend"
+    }
+  ],
+  "settings": {
+    "editor.codeLens": true,
+    "java.debug.settings.enableRunDebugCodeLens": true,
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.import.maven.enabled": true,
+    "java.project.explorer.showNonJavaResources": true,
+    "maven.excludedFolders": [
+      "**/.*",
+      "**/node_modules",
+      "**/target",
+      "**/bin"
+    ]
+  },
+  "extensions": {
+    "recommendations": [
+      "redhat.java",
+      "vscjava.vscode-java-debug",
+      "vscjava.vscode-maven",
+      "vmware.vscode-spring-boot"
+    ]
+  }
+}

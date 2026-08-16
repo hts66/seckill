@@ -1,0 +1,23 @@
+server.port: 8103
+spring:
+  config.import: optional:nacos:seckill-activity-service.yml
+  application.name: seckill-activity-service
+  cloud.nacos.discovery.server-addr: ${NACOS_ADDR:localhost:8848}
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${ACTIVITY_DB:seckill_activity}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:}
+    password: ${MYSQL_PASSWORD:}
+  data.redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6380}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5673}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+security.internal-token: ${INTERNAL_TOKEN:}
+management.endpoints.web.exposure.include: health,info

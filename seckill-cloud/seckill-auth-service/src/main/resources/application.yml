@@ -1,0 +1,29 @@
+server:
+  port: 8101
+spring:
+  config.import: optional:nacos:seckill-auth-service.yml
+  application.name: seckill-auth-service
+  cloud.nacos.discovery.server-addr: ${NACOS_ADDR:localhost:8848}
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${AUTH_DB:seckill_auth}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:}
+    password: ${MYSQL_PASSWORD:}
+  data.redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6380}
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+security:
+  internal-token: ${INTERNAL_TOKEN:}
+  jwt:
+    private-key: ${JWT_PRIVATE_KEY:}
+    public-key: ${JWT_PUBLIC_KEY:}
+    private-key-file: ${JWT_PRIVATE_KEY_FILE:keys/private.pem}
+    public-key-file: ${JWT_PUBLIC_KEY_FILE:keys/public.pem}
+management.endpoints.web.exposure.include: health,info

@@ -1,0 +1,58 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Gateway (8080)",
+      "request": "launch",
+      "mainClass": "com.example.seckill.cloud.gateway.GatewayApplication",
+      "projectName": "seckill-gateway",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "java",
+      "name": "Auth Service (8101)",
+      "request": "launch",
+      "mainClass": "com.example.seckill.cloud.auth.AuthApplication",
+      "projectName": "seckill-auth-service",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "java",
+      "name": "Product Service (8102)",
+      "request": "launch",
+      "mainClass": "com.example.seckill.cloud.product.ProductApplication",
+      "projectName": "seckill-product-service",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "java",
+      "name": "Activity Service (8103)",
+      "request": "launch",
+      "mainClass": "com.example.seckill.cloud.activity.ActivityApplication",
+      "projectName": "seckill-activity-service",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "java",
+      "name": "Order Service (8104)",
+      "request": "launch",
+      "mainClass": "com.example.seckill.cloud.order.OrderApplication",
+      "projectName": "seckill-order-service",
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "All Spring Cloud Services",
+      "configurations": [
+        "Auth Service (8101)",
+        "Product Service (8102)",
+        "Activity Service (8103)",
+        "Order Service (8104)",
+        "Gateway (8080)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

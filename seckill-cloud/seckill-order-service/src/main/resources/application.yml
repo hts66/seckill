@@ -1,0 +1,22 @@
+server.port: 8104
+spring:
+  config.import: optional:nacos:seckill-order-service.yml
+  application.name: seckill-order-service
+  cloud.nacos.discovery.server-addr: ${NACOS_ADDR:localhost:8848}
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${ORDER_DB:seckill_order}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:}
+    password: ${MYSQL_PASSWORD:}
+  data.redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6380}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5673}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
+    listener.simple:
+      acknowledge-mode: auto
+      default-requeue-rejected: true
+security.internal-token: ${INTERNAL_TOKEN:}
+management.endpoints.web.exposure.include: health,info

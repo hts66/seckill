@@ -1,0 +1,3 @@
+package com.example.seckill.cloud.product;
+import io.minio.MinioClient;import org.springframework.beans.factory.annotation.Value;import org.springframework.boot.SpringApplication;import org.springframework.boot.autoconfigure.SpringBootApplication;import org.springframework.context.annotation.Bean;
+@SpringBootApplication(scanBasePackages="com.example.seckill.cloud") public class ProductApplication{public static void main(String[]a){SpringApplication.run(ProductApplication.class,a);}@Bean MinioClient minio(@Value("${minio.endpoint}")String e,@Value("${minio.access-key}")String a,@Value("${minio.secret-key}")String s){return MinioClient.builder().endpoint(e).credentials(a,s).build();}}

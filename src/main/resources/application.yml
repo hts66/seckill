@@ -1,0 +1,115 @@
+server:
+  port: 8081
+  tomcat:
+    threads:
+      max: 500              # 最大工作线程（默认200）
+      min-spare: 50         # 最小空闲线程
+    accept-count: 500       # 等待队列（默认100）
+    max-connections: 10000  # 最大连接数（默认8192）
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  application:
+    name: seckill
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 50MB
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/seckill?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      initial-size: 20
+      min-idle: 20
+      max-active: 50
+      max-wait: 10000
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      filters: stat,wall
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: ${DRUID_USERNAME:}
+        login-password: ${DRUID_PASSWORD:}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 10
+
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
+    listener:
+      simple:
+        auto-startup: true      # MQ 消费者随应用启动
+        prefetch: 1           # 每次只取1条，公平分配
+        concurrency: 10       # 最小消费者线程数
+        max-concurrency: 20   # 最大消费者线程数
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+jwt:
+  secret: ${JWT_SECRET:}
+  access-expiration: 1800000      # 30分鐘
+  refresh-expiration: 604800000   # 7天
+
+# 秒杀业务配置
+seckill:
+  path-ttl: 60              # 秒杀路径有效期（秒）
+  access-limit:
+    max-count: 10            # N秒内最多M次请求
+    seconds: 5               # 限流时间窗口
+
+auth:
+  mail:
+    enabled: ${AUTH_MAIL_ENABLED:true}
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
+  bucket: ${MINIO_BUCKET:seckill}

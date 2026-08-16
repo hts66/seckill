@@ -1,0 +1,297 @@
+x-app-environment: &app-environment
+  NACOS_ADDR: nacos:8848
+  SPRING_CLOUD_NACOS_CONFIG_SERVER_ADDR: nacos:8848
+  MYSQL_HOST: mysql
+  MYSQL_PORT: 3306
+  MYSQL_USERNAME: ${MYSQL_USERNAME:?MYSQL_USERNAME must be set in .env}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME must be set in .env}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:?INTERNAL_TOKEN must be set in .env}
+
+x-java-dependencies: &java-dependencies
+  mysql:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+  nacos:
+    condition: service_healthy
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command: ["--default-time-zone=+08:00"]
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env}
+      MYSQL_USER: ${MYSQL_USERNAME:?MYSQL_USERNAME must be set in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME must be set in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}
+    ports:
+      - "${RABBITMQ_PORT:-5673}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set in .env}
+    ports:
+      - "${MINIO_API_PORT:-9010}:9000"
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - minio-data:/data
+
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+    ports:
+      - "${NACOS_PORT:-8848}:8848"
+      - "${NACOS_GRPC_PORT:-9848}:9848"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8848/nacos/v1/console/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  seckill-auth-service:
+    image: seckill/auth-service:1.0.0
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+        SERVICE: seckill-auth-service
+    environment:
+      <<: *app-environment
+      MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      JWT_PRIVATE_KEY_FILE: /app/keys/private.pem
+      JWT_PUBLIC_KEY_FILE: /app/keys/public.pem
+    volumes:
+      - ./keys:/app/keys:ro
+    expose:
+      - "8101"
+    depends_on: *java-dependencies
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8101'"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  seckill-product-service:
+    image: seckill/product-service:1.0.0
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+        SERVICE: seckill-product-service
+    environment:
+      <<: *app-environment
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9010}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set in .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set in .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-seckill}
+    expose:
+      - "8102"
+    depends_on:
+      <<: *java-dependencies
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8102'"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  seckill-activity-service:
+    image: seckill/activity-service:1.0.0
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+        SERVICE: seckill-activity-service
+    environment:
+      <<: *app-environment
+    expose:
+      - "8103"
+    depends_on: *java-dependencies
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8103'"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  seckill-order-service:
+    image: seckill/order-service:1.0.0
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+        SERVICE: seckill-order-service
+    environment:
+      <<: *app-environment
+    expose:
+      - "8104"
+    depends_on: *java-dependencies
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8104'"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  ai-service:
+    image: seckill/ai-service:1.0.0
+    restart: unless-stopped
+    build:
+      context: ./ai-service
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?INTERNAL_TOKEN must be set in .env}
+      ORDER_SERVICE_URL: http://seckill-order-service:8104
+      PRODUCT_SERVICE_URL: http://seckill-product-service:8102
+      ACTIVITY_SERVICE_URL: http://seckill-activity-service:8103
+      REDIS_URL: redis://redis:6379/2
+    ports:
+      - "${AI_SERVICE_PORT:-8200}:8200"
+    depends_on:
+      redis:
+        condition: service_healthy
+      seckill-product-service:
+        condition: service_healthy
+      seckill-activity-service:
+        condition: service_healthy
+      seckill-order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  seckill-gateway:
+    image: seckill/gateway:1.0.0
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+        SERVICE: seckill-gateway
+    environment:
+      NACOS_ADDR: nacos:8848
+      SPRING_CLOUD_NACOS_CONFIG_SERVER_ADDR: nacos:8848
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?INTERNAL_TOKEN must be set in .env}
+      JWT_PUBLIC_KEY_FILE: /app/keys/public.pem
+      AI_SERVICE_URL: http://ai-service:8200
+    volumes:
+      - ./keys:/app/keys:ro
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      seckill-auth-service:
+        condition: service_healthy
+      seckill-product-service:
+        condition: service_healthy
+      seckill-activity-service:
+        condition: service_healthy
+      seckill-order-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  frontend:
+    image: seckill/frontend:1.0.0
+    restart: unless-stopped
+    build:
+      context: ../seckill-frontend
+      dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      seckill-gateway:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbit-data:
+  minio-data:

@@ -1,0 +1,1 @@
+package com.example.seckill.cloud.order;import org.springframework.boot.SpringApplication;import org.springframework.boot.autoconfigure.SpringBootApplication;@SpringBootApplication(scanBasePackages="com.example.seckill.cloud")public class OrderApplication{public static void main(String[]a){SpringApplication.run(OrderApplication.class,a);}}

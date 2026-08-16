@@ -1,0 +1,42 @@
+server:
+  port: 8080
+spring:
+  config.import: optional:nacos:seckill-gateway.yml
+  application:
+    name: seckill-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+    gateway:
+      routes:
+        - id: auth
+          uri: lb://seckill-auth-service
+          predicates:
+            - Path=/api/auth/**,/api/captcha/**
+        - id: product
+          uri: lb://seckill-product-service
+          predicates:
+            - Path=/api/products/**,/api/admin/products/**
+        - id: activity
+          uri: lb://seckill-activity-service
+          predicates:
+            - Path=/api/seckill/**,/api/admin/activities/**,/api/admin/items/**,/api/admin/stock/**
+        - id: order
+          uri: lb://seckill-order-service
+          predicates:
+            - Path=/api/orders/**,/api/addresses/**,/api/admin/orders/**
+        - id: ai-customer-service
+          uri: ${AI_SERVICE_URL:http://localhost:8200}
+          predicates:
+            - Path=/api/customer-service/**
+security:
+  internal-token: ${INTERNAL_TOKEN:}
+  jwt:
+    public-key: ${JWT_PUBLIC_KEY:}
+    public-key-file: ${JWT_PUBLIC_KEY_FILE:keys/public.pem}
+management:
+  endpoints.web.exposure.include: health,info,gateway
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
