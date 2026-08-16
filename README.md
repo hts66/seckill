@@ -13,13 +13,21 @@
 
 ## 项目截图
 
-将项目截图放入 `docs/images/`，然后取消下面对应图片的注释或按实际文件名添加图片：
+### 登录与邮箱验证码
 
-<!-- ![商城首页](docs/images/home.png) -->
-<!-- ![秒杀页面](docs/images/seckill.png) -->
-<!-- ![订单管理](docs/images/orders.png) -->
-<!-- ![管理后台](docs/images/admin.png) -->
-<!-- ![AI 智能客服](docs/images/ai-customer-service.png) -->
+![登录与邮箱验证码](docs/images/28aa886d-4858-4b48-9613-2b72b4e1b8c2.png)
+
+### 管理台订单
+
+![管理台订单](docs/images/31e0805d-6b19-43c1-9fe3-8c58fb87283c.png)
+
+### AI 智能客服
+
+![AI 智能客服](docs/images/536889a0-120a-4603-a4a1-f3776b6dc506.png)
+
+### JMeter 压测报告
+
+![JMeter 压测报告](docs/images/65245137-313b-425c-a4c9-e91766822186.png)
 
 ## 技术栈
 
