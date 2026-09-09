@@ -12,6 +12,13 @@ x-app-environment: &app-environment
   RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME must be set in .env}
   RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}
   INTERNAL_TOKEN: ${INTERNAL_TOKEN:?INTERNAL_TOKEN must be set in .env}
+  ALIPAY_ENABLED: ${ALIPAY_ENABLED:-false}
+  ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+  ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+  ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+  ALIPAY_GATEWAY_URL: ${ALIPAY_GATEWAY_URL:-https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+  ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-http://localhost:8080/api/payments/alipay/notify}
+  ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-http://localhost:${FRONTEND_PORT:-80}/orders?payReturn=1}
 
 x-java-dependencies: &java-dependencies
   mysql:
@@ -221,6 +228,20 @@ services:
       PRODUCT_SERVICE_URL: http://seckill-product-service:8102
       ACTIVITY_SERVICE_URL: http://seckill-activity-service:8103
       REDIS_URL: redis://redis:6379/2
+      # RAG retrieval. Default provider is a hosted embedding API (no torch in the
+      # image). Set EMBEDDING_PROVIDER=local and bake requirements-embeddings.txt
+      # into the image to run bge embeddings offline instead.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-https://api.openai.com/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_API_MODEL: ${EMBEDDING_API_MODEL:-text-embedding-3-small}
+      RAG_TOP_K: ${RAG_TOP_K:-3}
+      RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.45}
+      # Optional LangSmith tracing
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-seckill-ai-customer-service}
     ports:
       - "${AI_SERVICE_PORT:-8200}:8200"
     depends_on:

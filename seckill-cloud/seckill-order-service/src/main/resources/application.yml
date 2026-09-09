@@ -7,6 +7,11 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${ORDER_DB:seckill_order}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:}
     password: ${MYSQL_PASSWORD:}
+    # HTTP 请求与 MQ 消费者共用连接池，默认 10 条不够 8 个并发消费者加接口流量。
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:30}
+      minimum-idle: 10
+      connection-timeout: 3000
   data.redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6380}
@@ -18,5 +23,18 @@ spring:
     listener.simple:
       acknowledge-mode: auto
       default-requeue-rejected: true
+      # 默认单消费者会让订单落库完全串行，成为异步链路的真正瓶颈；
+      # 队列积压还会让 broker 换页到磁盘，反过来拖慢生产端的 publisher confirm。
+      concurrency: ${MQ_CONCURRENCY:8}
+      max-concurrency: ${MQ_MAX_CONCURRENCY:16}
+      prefetch: 50
 security.internal-token: ${INTERNAL_TOKEN:}
+app.alipay:
+  enabled: ${ALIPAY_ENABLED:false}
+  app-id: ${ALIPAY_APP_ID:}
+  private-key: ${ALIPAY_PRIVATE_KEY:}
+  alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+  gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+  notify-url: ${ALIPAY_NOTIFY_URL:http://localhost:8080/api/payments/alipay/notify}
+  return-url: ${ALIPAY_RETURN_URL:http://localhost:5173/orders?payReturn=1}
 management.endpoints.web.exposure.include: health,info

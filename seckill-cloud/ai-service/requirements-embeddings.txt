@@ -1,0 +1,6 @@
+# Local embedding backend for RAG (EMBEDDING_PROVIDER=local).
+# Heavy (pulls in torch); install only when you want offline semantic search:
+#     pip install -r requirements-embeddings.txt
+# The model BAAI/bge-small-zh-v1.5 (~95MB) downloads on first use. Behind the
+# GFW it is fetched from https://hf-mirror.com automatically.
+sentence-transformers>=3.0,<6

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { getSeckillItems, getUpcomingItems } from '../api/seckill'
+import { firstImage } from '../utils/image'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -63,9 +64,9 @@ function startStatusTimer() {
   }, 1000)
 }
 
-function goSeckill(item) {
-  if (!userStore.isLoggedIn) { router.push('/login'); return }
-  router.push(`/seckill/${item.id}`)
+// 点击商品先进详情页查看，由详情页决定是否抢购
+function goDetail(item) {
+  router.push(`/item/${item.id}`)
 }
 
 function calcDiscount(original, seckill) {
@@ -88,15 +89,9 @@ function formatCountdown(targetTime) {
   return `${s}秒`
 }
 
-// 获取第一张图片或placeholder
+// 获取第一张图片（已做 host 替换，电脑/手机都能正常显示）
 function getFirstImage(imagesJson) {
-  if (!imagesJson) return null
-  try {
-    const arr = JSON.parse(imagesJson)
-    return arr.length > 0 ? arr[0] : null
-  } catch {
-    return null
-  }
+  return firstImage(imagesJson)
 }
 
 onMounted(() => {
@@ -127,7 +122,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
         <div v-for="item in upcomingItems" :key="item.id" class="card fade-in upcoming-card"
              style="margin-bottom:14px;overflow:hidden;">
-          <div style="display:flex;cursor:default;">
+          <div style="display:flex;cursor:pointer;" @click="goDetail(item)">
             <!-- 商品图片 -->
             <div class="item-image" style="width:120px;height:120px;flex-shrink:0;">
               <img
@@ -167,7 +162,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
                   <span style="font-size:18px;font-weight:800;color:var(--primary);font-family:monospace;">
                     {{ formatCountdown(item.activityStartTime) }}
                   </span>
-                  <button class="btn btn-primary btn-sm" disabled style="opacity:0.5;">即将开抢</button>
+                  <button class="btn btn-primary btn-sm" @click.stop="goDetail(item)">查看详情</button>
                 </div>
 
                 <div style="font-size:11px;color:var(--text-light);margin-top:2px;">
@@ -188,7 +183,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
         <div v-for="item in activeItems" :key="item.id" class="card fade-in"
              style="display:flex;margin-bottom:14px;cursor:pointer;overflow:hidden;"
-             @click="goSeckill(item)">
+             @click="goDetail(item)">
           <!-- 商品图片 -->
           <div style="width:120px;height:120px;flex-shrink:0;">
             <img
@@ -220,7 +215,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
                 </span>
                 <span class="badge badge-red" style="margin-left:8px;">{{ calcDiscount(item.originalPrice, item.seckillPrice) }}% OFF</span>
               </div>
-              <button class="btn btn-primary btn-sm">立即抢购</button>
+              <button v-if="!userStore.isAdmin" class="btn btn-primary btn-sm">查看详情</button>
+              <span v-else style="font-size:12px;color:var(--text-light);">管理员无购买权限</span>
             </div>
             <div style="font-size:12px;color:var(--text-light);">库存：{{ item.stock }} 件 | 每人限购 {{ item.limitPerUser }} 件</div>
           </div>

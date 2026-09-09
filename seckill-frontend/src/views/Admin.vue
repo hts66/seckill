@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import ImageUpload from '../components/ImageUpload.vue'
+import ChatPanel from '../components/ChatPanel.vue'
 import {
   getProducts, createProduct, updateProduct, deleteProduct,
   uploadImage, uploadImages, deleteUploadedImage
@@ -8,8 +9,10 @@ import {
 import {
   getActivities, createActivity, updateActivity, deleteActivity,
   getActivityItems, createSeckillItem, updateSeckillItem, deleteSeckillItem,
-  warmUpActivity, getRedisStock, getAllOrders, shipOrder
+  warmUpActivity, getRedisStock, getAllOrders, getAdminOrderDetail, cancelAdminOrder, shipOrder
 } from '../api/seckill'
+import { getAdminConversations } from '../api/chat'
+import { connectChat, onChat } from '../composables/useChat'
 
 // ============ Tab 切换 ============
 const tab = ref('products')
@@ -267,14 +270,52 @@ async function checkStock(itemId) {
 }
 
 const orders = ref([])
+const orderLoading = ref(false)
+const orderFilters = ref({ keyword: '', status: '', fulfillment: '' })
+const orderPage = ref({ page: 1, size: 20, total: 0 })
+const detailOrder = ref(null)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(orderPage.value.total / orderPage.value.size)))
+
 async function queryOrders() {
+  orderLoading.value = true
   try {
-    const res = await getAllOrders()
-    orders.value = res.data || []
+    const params = { page: orderPage.value.page, size: orderPage.value.size }
+    if (orderFilters.value.keyword.trim()) params.keyword = orderFilters.value.keyword.trim()
+    if (orderFilters.value.status !== '') params.status = orderFilters.value.status
+    if (orderFilters.value.fulfillment !== '') params.fulfillment = orderFilters.value.fulfillment
+    const res = await getAllOrders(params)
+    const data = res.data || {}
+    orders.value = data.list || []
+    orderPage.value.total = data.total || 0
   } catch (e) {
     console.error(e)
     orders.value = []
     alert('订单查询失败: ' + (e?.response?.data?.message || e.message || '未知错误'))
+  } finally {
+    orderLoading.value = false
+  }
+}
+
+function resetOrderFilters() {
+  orderFilters.value = { keyword: '', status: '', fulfillment: '' }
+  orderPage.value.page = 1
+  queryOrders()
+}
+
+function changePage(delta) {
+  const next = orderPage.value.page + delta
+  if (next < 1 || next > totalPages.value) return
+  orderPage.value.page = next
+  queryOrders()
+}
+
+async function openOrderDetail(orderNo) {
+  detailOrder.value = null
+  try {
+    detailOrder.value = (await getAdminOrderDetail(orderNo)).data
+  } catch (e) {
+    alert('订单详情加载失败: ' + (e?.response?.data?.message || e.message || '未知错误'))
   }
 }
 
@@ -283,14 +324,53 @@ async function doShipOrder(orderNo) {
   try {
     await shipOrder(orderNo)
     await queryOrders()
+    if (detailOrder.value?.orderNo === orderNo) detailOrder.value = null
   } catch (e) {
     alert('发货失败: ' + (e?.response?.data?.message || e.message || '未知错误'))
   }
 }
 
+async function doCancelOrder(orderNo) {
+  if (!confirm('确认取消该订单吗？已支付订单将直接退款（模拟）。')) return
+  try {
+    await cancelAdminOrder(orderNo)
+    await queryOrders()
+    if (detailOrder.value?.orderNo === orderNo) detailOrder.value = null
+  } catch (e) {
+    alert('操作失败: ' + (e?.response?.data?.message || e.message || '未知错误'))
+  }
+}
+
 const statusMap = ['未开始', '预热中', '进行中', '已结束']
-const orderStatusMap = ['待支付', '已支付', '已取消', '超时取消']
+const orderStatusMap = ['待支付', '已支付', '已取消', '超时取消', '', '已退款']
 const fulfillmentStatusMap = ['待填写地址', '待发货', '已发货', '已收货']
+
+// ============ 客服工作台 ============
+const conversations = ref([])
+const activeConvId = ref(null)
+
+async function loadConversations() {
+  try {
+    const res = await getAdminConversations()
+    conversations.value = res.data || []
+  } catch (e) {
+    console.error('加载客服会话失败', e)
+  }
+}
+
+function openConversation(id) {
+  activeConvId.value = id
+}
+
+// 收到会话变更（新咨询 / 新消息 / 已读），置顶并更新未读
+function upsertConversation(conv) {
+  if (!conv) return
+  const idx = conversations.value.findIndex(c => c.id === conv.id)
+  if (idx >= 0) conversations.value.splice(idx, 1)
+  conversations.value.unshift(conv)
+}
+
+let offConversation
 
 onMounted(() => {
   loadProducts()
@@ -298,10 +378,14 @@ onMounted(() => {
   stockTimer = window.setInterval(() => {
     if (activities.value.length > 0) refreshActivityStocks()
   }, 3000)
+  connectChat()
+  loadConversations()
+  offConversation = onChat('conversation', d => upsertConversation(d.conversation))
 })
 
 onUnmounted(() => {
   if (stockTimer) window.clearInterval(stockTimer)
+  offConversation?.()
 })
 </script>
 
@@ -317,8 +401,14 @@ onUnmounted(() => {
       <button class="btn" :class="tab==='activities'?'btn-primary':'btn-outline'" @click="tab='activities'">
         🎯 活动管理
       </button>
+      <button class="btn" :class="tab==='orders'?'btn-primary':'btn-outline'" @click="tab='orders'; queryOrders()">
+        📋 订单管理
+      </button>
       <button class="btn" :class="tab==='tools'?'btn-primary':'btn-outline'" @click="tab='tools'">
         🔧 运营工具
+      </button>
+      <button class="btn" :class="tab==='chat'?'btn-primary':'btn-outline'" @click="tab='chat'; loadConversations()">
+        💬 客服
       </button>
     </div>
 
@@ -518,19 +608,44 @@ onUnmounted(() => {
         <div v-if="stockResult" style="margin-top:8px;font-size:13px;color:var(--success);">{{ stockResult }}</div>
       </div>
 
+    </div>
+
+    <!-- ==================== 订单管理 ==================== -->
+    <div v-if="tab==='orders'">
       <div class="card" style="padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <h2 style="font-size:16px;margin:0;">📋 所有订单</h2>
-          <button class="btn btn-outline btn-sm" @click="queryOrders">刷新</button>
+        <!-- 筛选栏 -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+          <input v-model="orderFilters.keyword" class="input" placeholder="订单号 / 买家 / 手机号"
+                 style="flex:1;min-width:180px;padding:8px;font-size:13px;" @keyup.enter="orderPage.page=1; queryOrders()">
+          <select v-model="orderFilters.status" class="input" style="width:auto;padding:8px;font-size:13px;">
+            <option value="">支付状态：全部</option>
+            <option :value="0">待支付</option>
+            <option :value="1">已支付</option>
+            <option :value="2">已取消</option>
+            <option :value="3">超时取消</option>
+            <option :value="5">已退款</option>
+          </select>
+          <select v-model="orderFilters.fulfillment" class="input" style="width:auto;padding:8px;font-size:13px;">
+            <option value="">履约状态：全部</option>
+            <option :value="0">待填写地址</option>
+            <option :value="1">待发货</option>
+            <option :value="2">已发货</option>
+            <option :value="3">已收货</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="orderPage.page=1; queryOrders()">搜索</button>
+          <button class="btn btn-outline btn-sm" @click="resetOrderFilters">重置</button>
         </div>
-        <div v-if="orders.length===0" style="color:var(--text-light);font-size:14px;">点击刷新查询</div>
+
+        <!-- 列表 -->
+        <div v-if="orderLoading" style="color:var(--text-light);font-size:14px;padding:16px 0;">加载中...</div>
+        <div v-else-if="orders.length===0" class="empty-state"><p>暂无符合条件的订单</p></div>
         <table v-else style="width:100%;font-size:13px;border-collapse:collapse;">
           <thead>
             <tr style="text-align:left;border-bottom:2px solid var(--border);">
               <th style="padding:8px;">ID</th>
               <th style="padding:8px;">订单号</th>
+              <th style="padding:8px;">商品</th>
               <th style="padding:8px;">买家</th>
-              <th style="padding:8px;">用户ID</th>
               <th style="padding:8px;">收货信息</th>
               <th style="padding:8px;">金额</th>
               <th style="padding:8px;">状态</th>
@@ -542,13 +657,13 @@ onUnmounted(() => {
           <tbody>
             <tr v-for="o in orders" :key="o.id" style="border-bottom:1px solid var(--border);">
               <td style="padding:8px;">{{ o.id }}</td>
-              <td style="padding:8px;">{{ o.orderNo?.substring(0,12) }}...</td>
+              <td style="padding:8px;" title="{{ o.orderNo }}">{{ o.orderNo?.substring(0,12) }}...</td>
+              <td style="padding:8px;">{{ o.productName || ('商品#' + o.itemId) }}</td>
               <td style="padding:8px;">
                 <div>{{ o.buyerName || '未知用户' }}</div>
                 <div style="font-size:11px;color:var(--text-light);">{{ o.buyerEmail || '-' }}</div>
               </td>
-              <td style="padding:8px;">{{ o.userId }}</td>
-              <td style="padding:8px;min-width:220px;">
+              <td style="padding:8px;min-width:200px;">
                 <template v-if="o.receiverName">
                   <div>{{ o.receiverName }} {{ o.receiverPhone }}</div>
                   <div style="font-size:11px;color:var(--text-light);">{{ o.receiverProvince }} {{ o.receiverCity }} {{ o.receiverDistrict }} {{ o.receiverDetail }}</div>
@@ -566,14 +681,101 @@ onUnmounted(() => {
                   {{ fulfillmentStatusMap[o.fulfillmentStatus] || '待填写地址' }}
                 </span>
               </td>
-              <td style="padding:8px;">
-                <button v-if="o.status===1 && o.fulfillmentStatus===1" class="btn btn-success btn-sm" @click="doShipOrder(o.orderNo)">发货</button>
-                <span v-else style="color:var(--text-light);font-size:12px;">-</span>
+              <td style="padding:8px;white-space:nowrap;">
+                <button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:12px;" @click="openOrderDetail(o.orderNo)">详情</button>
+                <button v-if="o.status===1 && o.fulfillmentStatus===1" class="btn btn-success btn-sm" style="padding:3px 8px;font-size:12px;margin-left:4px;" @click="doShipOrder(o.orderNo)">发货</button>
+                <button v-if="o.status===0 || (o.status===1 && o.fulfillmentStatus<2)" class="btn btn-danger btn-sm" style="padding:3px 8px;font-size:12px;margin-left:4px;" @click="doCancelOrder(o.orderNo)">取消</button>
               </td>
               <td style="padding:8px;">{{ o.createdAt }}</td>
             </tr>
           </tbody>
         </table>
+
+        <!-- 分页 -->
+        <div v-if="!orderLoading && orders.length>0" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+          <span style="font-size:13px;color:var(--text-light);">共 {{ orderPage.total }} 条 · 第 {{ orderPage.page }}/{{ totalPages }} 页</span>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-outline btn-sm" :disabled="orderPage.page<=1" @click="changePage(-1)">上一页</button>
+            <button class="btn btn-outline btn-sm" :disabled="orderPage.page>=totalPages" @click="changePage(1)">下一页</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 订单详情弹窗 -->
+      <div v-if="detailOrder" class="modal-overlay" @click.self="detailOrder=null">
+        <div class="modal-card" style="max-width:640px;">
+          <h2 style="margin-bottom:14px;">订单详情</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:13px;">
+            <div><span style="color:var(--text-light);">订单号</span><br>{{ detailOrder.orderNo }}</div>
+            <div><span style="color:var(--text-light);">下单时间</span><br>{{ detailOrder.createdAt }}</div>
+            <div><span style="color:var(--text-light);">商品</span><br>{{ detailOrder.productName || ('商品#' + detailOrder.itemId) }}<span v-if="detailOrder.productTitle" style="color:var(--text-light);"> · {{ detailOrder.productTitle }}</span></div>
+            <div><span style="color:var(--text-light);">金额</span><br><strong style="color:var(--primary);">￥{{ Number(detailOrder.amount||0).toFixed(2) }}</strong></div>
+            <div><span style="color:var(--text-light);">买家</span><br>{{ detailOrder.buyerName || '未知用户' }}（{{ detailOrder.buyerEmail || '-' }}）</div>
+            <div>
+              <span style="color:var(--text-light);">状态</span><br>
+              <span class="badge" :class="detailOrder.status===1?'badge-green':detailOrder.status===0?'badge-yellow':'badge-gray'">{{ orderStatusMap[detailOrder.status] || '未知' }}</span>
+              <span class="badge" style="margin-left:4px;" :class="detailOrder.fulfillmentStatus===2?'badge-green':detailOrder.fulfillmentStatus===0?'badge-yellow':'badge-gray'">{{ fulfillmentStatusMap[detailOrder.fulfillmentStatus] || '待填写地址' }}</span>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:13px;">
+            <span style="color:var(--text-light);">收货信息：</span>
+            <template v-if="detailOrder.receiverName">
+              {{ detailOrder.receiverName }} {{ detailOrder.receiverPhone }} · {{ detailOrder.receiverProvince }} {{ detailOrder.receiverCity }} {{ detailOrder.receiverDistrict }} {{ detailOrder.receiverDetail }}
+            </template>
+            <span v-else style="color:var(--warning);">待用户填写地址</span>
+          </div>
+          <div style="margin-top:14px;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px;">订单时间线</div>
+            <div style="font-size:13px;color:var(--text-light);line-height:1.9;">
+              <div>🕐 创建订单：{{ detailOrder.createdAt || '-' }}</div>
+              <div>💳 支付：{{ detailOrder.payTime || '未支付' }}</div>
+              <div>🚚 发货：{{ detailOrder.shippingTime || '未发货' }}</div>
+              <div v-if="detailOrder.cancelTime">❌ 取消/退款：{{ detailOrder.cancelTime }}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button v-if="detailOrder.status===1 && detailOrder.fulfillmentStatus===1" class="btn btn-success btn-sm" @click="doShipOrder(detailOrder.orderNo)">发货</button>
+            <button v-if="detailOrder.status===0 || (detailOrder.status===1 && detailOrder.fulfillmentStatus<2)" class="btn btn-danger btn-sm" @click="doCancelOrder(detailOrder.orderNo)">取消/退款</button>
+            <button class="btn btn-outline btn-sm" @click="detailOrder=null">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 客服工作台 ==================== -->
+    <div v-if="tab==='chat'">
+      <div class="chat-workbench">
+        <div class="conv-list">
+          <div class="conv-head">
+            咨询会话
+            <button class="btn btn-outline btn-sm" style="float:right;padding:2px 10px;" @click="loadConversations">刷新</button>
+          </div>
+          <div v-if="conversations.length===0" class="conv-empty">暂无用户咨询</div>
+          <div
+            v-for="c in conversations"
+            :key="c.id"
+            class="conv-item"
+            :class="{ active: activeConvId===c.id }"
+            @click="openConversation(c.id)"
+          >
+            <div class="conv-top">
+              <span class="conv-email">{{ c.userEmail || ('用户#' + c.userId) }}</span>
+              <span v-if="c.unreadAdmin" class="conv-badge">{{ c.unreadAdmin > 99 ? '99+' : c.unreadAdmin }}</span>
+            </div>
+            <div class="conv-order">订单 {{ (c.orderNo || '').substring(0, 18) }}</div>
+            <div class="conv-last">{{ c.lastContent || '（暂无消息）' }}</div>
+          </div>
+        </div>
+        <div class="conv-chat">
+          <ChatPanel
+            v-if="activeConvId"
+            :key="activeConvId"
+            :conversation-id="activeConvId"
+            :self-type="1"
+            title="客服对话"
+          />
+          <div v-else class="conv-placeholder">← 选择左侧会话开始回复</div>
+        </div>
       </div>
     </div>
   </div>
@@ -590,5 +792,36 @@ onUnmounted(() => {
   background: var(--card-bg); border-radius: var(--radius);
   box-shadow: 0 8px 40px rgba(0,0,0,0.15); padding: 24px;
   width: 100%; max-width: 560px; max-height: 80vh; overflow-y: auto;
+}
+.chat-workbench {
+  display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start;
+}
+.conv-list {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card-bg); overflow: hidden;
+}
+.conv-head { padding: 12px 14px; font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--border); }
+.conv-empty { padding: 28px; text-align: center; color: var(--text-light); font-size: 13px; }
+.conv-item { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.conv-item:hover { background: var(--bg); }
+.conv-item.active { background: var(--primary-light); }
+.conv-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.conv-email { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-badge {
+  background: var(--danger); color: #fff; font-size: 11px; border-radius: 10px;
+  padding: 1px 7px; min-width: 18px; text-align: center; flex-shrink: 0;
+}
+.conv-order { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+.conv-last {
+  font-size: 12px; color: var(--text-light); margin-top: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conv-chat { min-width: 0; }
+.conv-placeholder {
+  padding: 80px 20px; text-align: center; color: var(--text-light);
+  border: 1px dashed var(--border); border-radius: var(--radius); font-size: 14px;
+}
+@media (max-width: 700px) {
+  .chat-workbench { grid-template-columns: 1fr; }
 }
 </style>

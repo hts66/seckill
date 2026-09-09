@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -9,12 +10,17 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .agent import build_graph, initial_messages
 from .config import Settings, get_settings
 from .models import ApiResponse, ChatRequest, ChatResponse, ConversationCreateResponse, HealthResponse, UserContext
+from .observability import MetricsCallbackHandler, log_request, setup_observability
+from .rag import get_rag_engine
 from .store import ConversationStore, StoredMessage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.store = ConversationStore(get_settings())
+    settings = get_settings()
+    setup_observability(settings)
+    get_rag_engine()  # warm embeddings + build the vector index at startup
+    app.state.store = ConversationStore(settings)
     yield
     await app.state.store.close()
 
@@ -68,25 +74,34 @@ async def load_context(request: Request, conversation_id: str, user: UserContext
 
 @app.post("/api/customer-service/conversations/{conversation_id}/messages", response_model=ApiResponse[ChatResponse])
 async def chat(conversation_id: str, body: ChatRequest, request: Request, user: UserContext = Depends(current_user)):
+    handler = MetricsCallbackHandler()
+    started = time.perf_counter()
+    ok, error_msg = True, None
     try:
         graph, tools, messages = await load_context(request, conversation_id, user, body.message)
-        result = await graph.ainvoke({"messages": messages})
+        result = await graph.ainvoke({"messages": messages}, config={"callbacks": [handler]})
         answer = str(result["messages"][-1].content)
         await request.app.state.store.append(conversation_id, user.user_id, [StoredMessage("user", body.message), StoredMessage("assistant", answer)])
         return ApiResponse(
             data=ChatResponse(conversation_id=conversation_id, message_id=str(uuid.uuid4()), answer=answer)
         )
     except RuntimeError as exc:
+        ok, error_msg = False, str(exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
+        ok, error_msg = False, str(exc)
         raise HTTPException(status_code=502, detail=f"客服暂时不可用：{exc}") from exc
     finally:
         if "tools" in locals():
             await tools.close()
+        log_request(conversation_id=conversation_id, user_id=user.user_id, mode="sync",
+                    handler=handler, total_ms=(time.perf_counter() - started) * 1000, ok=ok, error=error_msg)
 
 
 @app.post("/api/customer-service/conversations/{conversation_id}/messages/stream")
 async def stream_chat(conversation_id: str, body: ChatRequest, request: Request, user: UserContext = Depends(current_user)):
+    handler = MetricsCallbackHandler()
+    started = time.perf_counter()
     try:
         graph, tools, messages = await load_context(request, conversation_id, user, body.message)
     except RuntimeError as exc:
@@ -94,8 +109,9 @@ async def stream_chat(conversation_id: str, body: ChatRequest, request: Request,
 
     async def events():
         chunks: list[str] = []
+        ok, error_msg = True, None
         try:
-            async for event in graph.astream_events({"messages": messages}, version="v2"):
+            async for event in graph.astream_events({"messages": messages}, version="v2", config={"callbacks": [handler]}):
                 if await request.is_disconnected():
                     break
                 if event.get("event") != "on_chat_model_stream":
@@ -112,8 +128,11 @@ async def stream_chat(conversation_id: str, body: ChatRequest, request: Request,
                 await request.app.state.store.append(conversation_id, user.user_id, [StoredMessage("user", body.message), StoredMessage("assistant", answer)])
             yield f"data: {json.dumps({'type': 'done', 'messageId': str(uuid.uuid4())}, ensure_ascii=False)}\n\n"
         except Exception as exc:
+            ok, error_msg = False, str(exc)
             yield f"data: {json.dumps({'type': 'error', 'message': f'客服暂时不可用：{exc}'}, ensure_ascii=False)}\n\n"
         finally:
             await tools.close()
+            log_request(conversation_id=conversation_id, user_id=user.user_id, mode="stream",
+                        handler=handler, total_ms=(time.perf_counter() - started) * 1000, ok=ok, error=error_msg)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

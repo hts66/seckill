@@ -10,6 +10,11 @@ export function getUpcomingItems() {
   return request.get('/seckill/upcoming')
 }
 
+/** 获取单个商品详情 */
+export function getSeckillItemDetail(itemId) {
+  return request.get(`/seckill/items/${itemId}`)
+}
+
 /** 获取动态秒杀路径 */
 export function getSeckillPath(itemId) {
   return request.get(`/seckill/path/${itemId}`)
@@ -77,9 +82,19 @@ export function getRedisStock(itemId) {
   return request.get(`/admin/stock/${itemId}`)
 }
 
-/** 获取所有订单 */
-export function getAllOrders() {
-  return request.get('/admin/orders')
+/** 获取所有订单（管理端，支持筛选与分页） */
+export function getAllOrders(params = {}) {
+  return request.get('/admin/orders', { params })
+}
+
+/** 获取订单详情（管理端） */
+export function getAdminOrderDetail(orderNo) {
+  return request.get(`/admin/orders/${orderNo}`)
+}
+
+/** 管理员代取消/退款 */
+export function cancelAdminOrder(orderNo) {
+  return request.post(`/admin/orders/${orderNo}/cancel`)
 }
 
 export function shipOrder(orderNo) {

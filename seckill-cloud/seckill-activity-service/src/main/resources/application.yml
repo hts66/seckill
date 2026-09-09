@@ -7,6 +7,11 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${ACTIVITY_DB:seckill_activity}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:}
     password: ${MYSQL_PASSWORD:}
+    # 秒杀热路径每次请求都要查 item 快照，默认 10 条连接会先于 Tomcat 线程池成为瓶颈。
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:30}
+      minimum-idle: 10
+      connection-timeout: 3000
   data.redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6380}
@@ -19,5 +24,12 @@ spring:
     publisher-returns: true
     template:
       mandatory: true
+    # broker 卡住时 convertAndSend 会阻塞在「新建 channel 等 open-ok」上——这跟等回执无关，
+    # 是发布动作本身的开销。把 channel 缓存变成有界池并设检出超时，请求线程最多等 2 秒就快速失败，
+    # 不会无限新建 channel 把 Tomcat 线程全耗光。
+    cache.channel:
+      size: 50
+      checkout-timeout: 2000
+server.tomcat.threads.max: ${TOMCAT_MAX_THREADS:400}
 security.internal-token: ${INTERNAL_TOKEN:}
 management.endpoints.web.exposure.include: health,info

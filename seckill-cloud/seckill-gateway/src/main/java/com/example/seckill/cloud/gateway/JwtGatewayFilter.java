@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -20,7 +22,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
-public class JwtGatewayFilter implements GlobalFilter {
+// 必须排在 WebSocket/HTTP 路由过滤器(Ordered.LOWEST_PRECEDENCE - 1)之前执行，
+// 否则 WebSocket 升级请求会在鉴权头(X-User-* / X-Internal-Token)注入前就被转发到下游，导致 403。
+// 注意：Spring Cloud Gateway 的 FilteringWebHandler 只按 `instanceof Ordered` 取顺序，
+// 不识别 @Order 注解，因此这里必须实现 Ordered 接口而非使用 @Order。
+public class JwtGatewayFilter implements GlobalFilter, Ordered {
     private static final Logger log = LoggerFactory.getLogger(JwtGatewayFilter.class);
     private static final List<String> PUBLIC_PREFIXES = List.of(
             "/api/auth/", "/api/captcha", "/api/products", "/api/seckill/items", "/api/seckill/upcoming",
@@ -35,19 +41,34 @@ public class JwtGatewayFilter implements GlobalFilter {
     }
 
     @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE;
+    }
+
+    @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
         String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         boolean publicPath = PUBLIC_PREFIXES.stream().anyMatch(path::startsWith);
-        if ((authorization == null || !authorization.startsWith("Bearer ")) && publicPath) {
-            return chain.filter(sanitize(exchange, null));
+
+        // 浏览器原生 WebSocket 无法自定义 Authorization 头，聊天握手的 token 放在 query 参数 ?token= 上
+        boolean wsHandshake = path.startsWith("/ws/");
+        String token = null;
+        if (wsHandshake) {
+            token = exchange.getRequest().getQueryParams().getFirst("token");
+        } else if (authorization != null && authorization.startsWith("Bearer ")) {
+            token = authorization.substring(7);
         }
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
-            return error(exchange, 401, "请先登录");
+
+        if (token == null || token.isBlank()) {
+            if (publicPath) {
+                return chain.filter(sanitize(exchange, null));
+            }
+            return error(exchange, 401, wsHandshake ? "聊天登录已过期，请刷新后重试" : "请先登录");
         }
 
         try {
-            Jwt jwt = jwtDecoder.decode(authorization.substring(7));
+            Jwt jwt = jwtDecoder.decode(token);
             if (!"access".equals(jwt.getClaimAsString("type"))) {
                 return error(exchange, 401, "访问令牌无效");
             }

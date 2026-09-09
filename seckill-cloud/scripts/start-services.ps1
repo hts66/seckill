@@ -88,6 +88,11 @@ $env:JWT_PUBLIC_KEY = Get-Content -LiteralPath $publicKey -Raw
 
 $logs = Join-Path $projectRoot 'logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
+# Sentinel gateway flow-control defaults to writing logs under ~/logs/csp. On Windows it
+# can throw ExceptionInInitializerError (DateFileLogHandler NPE) and hang every gateway
+# request, so point it at a writable project-local directory.
+$sentinelLogs = Join-Path $logs 'sentinel'
+New-Item -ItemType Directory -Force -Path $sentinelLogs | Out-Null
 $pidDirectory = Join-Path $projectRoot 'run'
 New-Item -ItemType Directory -Force -Path $pidDirectory | Out-Null
 
@@ -117,7 +122,7 @@ foreach ($service in $services) {
     }
     $stdout = Join-Path $logs "$service.out.log"
     $stderr = Join-Path $logs "$service.err.log"
-    $process = Start-Process -FilePath 'java' -ArgumentList @('-jar', $jar) `
+    $process = Start-Process -FilePath 'java' -ArgumentList @("-Dcsp.sentinel.log.dir=$sentinelLogs", '-jar', $jar) `
         -WorkingDirectory $projectRoot -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
     $process.Id | Set-Content -LiteralPath $pidFile

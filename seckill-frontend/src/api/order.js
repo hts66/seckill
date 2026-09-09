@@ -10,12 +10,12 @@ export function getOrder(orderNo) {
   return request.get(`/orders/${orderNo}`)
 }
 
-/** 支付订单 */
+/** 模拟支付：点击支付按钮直接把订单标记为已支付 */
 export function payOrder(orderNo) {
   return request.post(`/orders/pay/${orderNo}`)
 }
 
-/** 取消订单 */
+/** 取消订单（已支付时按模拟退款处理） */
 export function cancelOrder(orderNo) {
   return request.post(`/orders/cancel/${orderNo}`)
 }

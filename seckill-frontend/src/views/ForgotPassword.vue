@@ -3,11 +3,13 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AuthShell from '../components/AuthShell.vue'
 import { getCaptcha, resetPasswordApi, sendEmailCodeApi } from '../api/auth'
-const router=useRouter(),loading=ref(false),sending=ref(false),countdown=ref(0),error=ref(''),success=ref('')
+import { useEmailCodeCooldown } from '../composables/useEmailCodeCooldown'
+const router=useRouter(),loading=ref(false),error=ref(''),success=ref('')
+const { sending, countdown, begin, fail, finish } = useEmailCodeCooldown()
 const form=reactive({email:'',newPassword:'',confirmPassword:'',code:'',captcha:'',captchaKey:''}),captchaImage=ref('')
 async function refreshCaptcha(){try{const r=await getCaptcha();form.captchaKey=r.data.key;captchaImage.value=r.data.image;form.captcha=''}catch{error.value='验证码加载失败，请确认服务已启动'}}
 const validEmail=()=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)
-async function sendCode(){error.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(!form.captcha)return error.value='发送邮件前请填写图形验证码';sending.value=true;try{const r=await sendEmailCodeApi({email:form.email,purpose:'reset',captcha:form.captcha,captchaKey:form.captchaKey});success.value=r.message;countdown.value=60;const timer=setInterval(()=>{countdown.value--;if(countdown.value<=0)clearInterval(timer)},1000);await refreshCaptcha()}catch(e){error.value=e.message;await refreshCaptcha()}finally{sending.value=false}}
+async function sendCode(){if(sending.value||countdown.value>0)return;error.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(!form.captcha)return error.value='发送邮件前请填写图形验证码';if(!begin())return;try{const r=await sendEmailCodeApi({email:form.email,purpose:'reset',captcha:form.captcha,captchaKey:form.captchaKey});success.value=r.message;await refreshCaptcha()}catch(e){error.value=e.message;await refreshCaptcha();fail()}finally{finish()}}
 async function submit(){error.value='';success.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(!/^(?=.*[A-Za-z])(?=.*\d).{8,64}$/.test(form.newPassword))return error.value='新密码至少8位，且同时包含字母和数字';if(form.newPassword!==form.confirmPassword)return error.value='两次输入的密码不一致';if(!form.code||!form.captcha)return error.value='请填写邮箱验证码和图形验证码';loading.value=true;try{await resetPasswordApi(form);success.value='密码已重置，即将返回登录';setTimeout(()=>router.replace('/login'),1000)}catch(e){error.value=e.message||'重置失败';await refreshCaptcha()}finally{loading.value=false}}
 onMounted(refreshCaptcha)
 </script>

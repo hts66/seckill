@@ -7,3 +7,8 @@ langchain>=0.3.20,<1
 langchain-core>=0.3.41,<1
 langchain-openai>=0.3.7,<1
 langgraph>=0.2.60,<1
+numpy>=1.26,<3
+faiss-cpu>=1.8,<2
+# Local embeddings (EMBEDDING_PROVIDER=local) need sentence-transformers; it pulls
+# in torch and is large, so it lives in requirements-embeddings.txt. Skip it and
+# set EMBEDDING_PROVIDER=openai to use a hosted embedding API instead.

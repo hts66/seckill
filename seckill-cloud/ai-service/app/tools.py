@@ -1,5 +1,5 @@
+import asyncio
 import json
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -7,6 +7,7 @@ from langchain_core.tools import tool
 
 from .config import Settings
 from .models import UserContext
+from .rag import get_rag_engine
 
 
 class BusinessTools:
@@ -37,24 +38,23 @@ class BusinessTools:
     def all_tools(self):
         @tool
         async def search_faq(query: str) -> str:
-            """搜索平台规则 FAQ。优先用于支付、地址、发货、退款和秒杀规则问题。"""
-            try:
-                items = json.loads(Path(self.settings.faq_file).read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                items = []
-            query_text = query.lower()
-            matches = []
-            for item in items:
-                keywords = [str(keyword).lower() for keyword in item.get("keywords", [])]
-                score = sum(1 for keyword in keywords if keyword and keyword in query_text)
-                if item.get("question", "").lower() in query_text:
-                    score += 2
-                if score:
-                    matches.append((score, item))
-            matches.sort(key=lambda pair: pair[0], reverse=True)
-            if not matches:
-                return "没有找到匹配的 FAQ。不要编造平台规则。"
-            return json.dumps([item for _, item in matches[:3]], ensure_ascii=False)
+            """语义检索平台规则 FAQ 知识库。优先用于抢购规则、支付、订单、地址、退款和账号问题。"""
+            engine = get_rag_engine()
+            # Embedding + vector search is sync CPU work; keep the event loop free.
+            hits = await asyncio.to_thread(engine.search, query, self.settings.rag_top_k)
+            relevant = [hit for hit in hits if hit["score"] >= self.settings.rag_min_score]
+            if not relevant:
+                return "没有找到匹配的 FAQ。不要编造平台规则，请引导用户到对应页面或人工客服。"
+            payload = [
+                {
+                    "question": hit["question"],
+                    "answer": hit["answer"],
+                    "category": hit["category"],
+                    "score": hit["score"],
+                }
+                for hit in relevant
+            ]
+            return json.dumps(payload, ensure_ascii=False)
 
         @tool
         async def query_my_orders(status: str = "") -> str:

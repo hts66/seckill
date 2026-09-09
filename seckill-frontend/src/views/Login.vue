@@ -4,13 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import AuthShell from '../components/AuthShell.vue'
 import { getCaptcha, sendEmailCodeApi } from '../api/auth'
 import { useUserStore } from '../stores/user'
+import { useEmailCodeCooldown } from '../composables/useEmailCodeCooldown'
 
 const router=useRouter(),route=useRoute(),store=useUserStore()
-const mode=ref('password'),loading=ref(false),sending=ref(false),countdown=ref(0),error=ref('')
+const mode=ref('password'),loading=ref(false),error=ref('')
+const { sending, countdown, begin, fail, finish } = useEmailCodeCooldown()
 const form=reactive({email:'',password:'',code:'',captcha:'',captchaKey:''}),captchaImage=ref('')
 async function refreshCaptcha(){try{const r=await getCaptcha();form.captchaKey=r.data.key;captchaImage.value=r.data.image;form.captcha=''}catch{error.value='验证码加载失败，请确认 Redis 和后端服务已启动'}}
 function validEmail(){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)}
-async function sendCode(){error.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(!form.captcha)return error.value='发送邮件前请填写图形验证码';sending.value=true;try{await sendEmailCodeApi({email:form.email,purpose:'login',captcha:form.captcha,captchaKey:form.captchaKey});countdown.value=60;const timer=setInterval(()=>{countdown.value--;if(countdown.value<=0)clearInterval(timer)},1000);await refreshCaptcha()}catch(e){error.value=e.message;await refreshCaptcha()}finally{sending.value=false}}
+async function sendCode(){if(sending.value||countdown.value>0)return;error.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(!form.captcha)return error.value='发送邮件前请填写图形验证码';if(!begin())return;try{await sendEmailCodeApi({email:form.email,purpose:'login',captcha:form.captcha,captchaKey:form.captchaKey});await refreshCaptcha()}catch(e){error.value=e.message;await refreshCaptcha();fail()}finally{finish()}}
 async function submit(){error.value='';if(!validEmail())return error.value='请输入正确的邮箱';if(mode.value==='password'&&!form.password)return error.value='请输入密码';if(mode.value==='code'&&!form.code)return error.value='请输入邮箱验证码';if(!form.captcha)return error.value='请输入图形验证码';loading.value=true;try{await store.login({...form},mode.value);await router.replace(String(route.query.redirect||'/'))}catch(e){error.value=e.message||'登录失败';await refreshCaptcha()}finally{loading.value=false}}
 onMounted(refreshCaptcha)
 </script>

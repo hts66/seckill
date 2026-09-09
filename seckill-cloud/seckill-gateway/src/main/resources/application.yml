@@ -25,7 +25,12 @@ spring:
         - id: order
           uri: lb://seckill-order-service
           predicates:
-            - Path=/api/orders/**,/api/addresses/**,/api/admin/orders/**
+            - Path=/api/orders/**,/api/addresses/**,/api/admin/orders/**,/api/chat/**,/api/admin/chat/**
+        - id: chat-ws
+          # 负载均衡转发 WebSocket 必须用 lb:ws:// 前缀，网关才会走 WS 升级转发而非普通 HTTP
+          uri: lb:ws://seckill-order-service
+          predicates:
+            - Path=/ws/chat,/ws/chat/**
         - id: ai-customer-service
           uri: ${AI_SERVICE_URL:http://localhost:8200}
           predicates:

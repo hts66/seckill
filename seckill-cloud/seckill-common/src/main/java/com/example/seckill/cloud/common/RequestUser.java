@@ -12,4 +12,8 @@ public record RequestUser(Long id, String email, int role) {
     public void requireAdmin() {
         if (role != 1) throw new IllegalStateException("没有管理权限");
     }
+    /** 管理员是运营角色，不允许参与秒杀购买。 */
+    public void requireCustomer() {
+        if (role == 1) throw new IllegalStateException("管理员不能购买商品");
+    }
 }

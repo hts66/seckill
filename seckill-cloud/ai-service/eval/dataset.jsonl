@@ -1,0 +1,26 @@
+{"question": "抢购的时候还没填收货地址要紧吗", "category": "抢购规则", "expected_faq_id": "seckill-no-address"}
+{"question": "一个人能不能抢好几件同样的商品", "category": "抢购规则", "expected_faq_id": "seckill-limit"}
+{"question": "为什么老是提示我已经买过了", "category": "抢购规则", "expected_faq_id": "seckill-limit"}
+{"question": "明明看到还有货怎么就是下不了单", "category": "抢购规则", "expected_faq_id": "seckill-stock"}
+{"question": "点了抢购之后页面一直在转圈", "category": "抢购规则", "expected_faq_id": "seckill-pending"}
+{"question": "秒杀路径无效这个报错怎么解决", "category": "抢购规则", "expected_faq_id": "seckill-path-invalid"}
+{"question": "现在到底能不能买活动开始了没", "category": "抢购规则", "expected_faq_id": "seckill-time-window"}
+{"question": "怎么才能看到还没开始的场次", "category": "活动", "expected_faq_id": "activity-upcoming"}
+{"question": "你们这儿能用微信支付吗", "category": "支付", "expected_faq_id": "pay-method", "answer_contains": ["支付宝"]}
+{"question": "抢到之后拖着不付款订单会不会作废", "category": "支付", "expected_faq_id": "pay-timing"}
+{"question": "我明明已经付过钱了怎么还显示待支付", "category": "支付", "expected_faq_id": "pay-status-delay"}
+{"question": "手抖付了两次会不会被多扣钱", "category": "支付", "expected_faq_id": "pay-duplicate"}
+{"question": "订单一共有哪几种状态", "category": "订单", "expected_faq_id": "order-status"}
+{"question": "履约状态显示待完善是什么意思", "category": "订单", "expected_faq_id": "order-fulfillment"}
+{"question": "我的东西怎么一直不发货", "category": "订单", "expected_faq_id": "order-not-ship"}
+{"question": "抢到商品之后去哪里填收货地址", "category": "地址", "expected_faq_id": "addr-add"}
+{"question": "收货地址写错了还能不能改", "category": "地址", "expected_faq_id": "addr-modify"}
+{"question": "这个订单我不想要了怎么取消", "category": "售后", "expected_faq_id": "order-cancel"}
+{"question": "退款一般多少天能到账", "category": "售后", "expected_faq_id": "refund"}
+{"question": "已经发货的订单还能申请退款吗", "category": "售后", "expected_faq_id": "refund-shipped"}
+{"question": "登录密码忘记了要怎么找回", "category": "账号", "expected_faq_id": "forgot-password"}
+{"question": "注册账号是用手机号还是邮箱", "category": "账号", "expected_faq_id": "account-register"}
+{"question": "今天天气怎么样适合出去玩吗", "category": "无关", "expected_faq_id": null, "expect_no_match": true}
+{"question": "帮我看看我自己的订单现在什么状态", "category": "工具路由", "expected_faq_id": null, "expected_tool": "query_my_orders"}
+{"question": "现在平台上都有哪些商品在卖", "category": "工具路由", "expected_faq_id": null, "expected_tool": "query_products"}
+{"question": "最近有什么正在进行的秒杀活动", "category": "工具路由", "expected_faq_id": null, "expected_tool": "query_activities"}
