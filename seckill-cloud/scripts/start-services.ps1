@@ -176,3 +176,18 @@ if ([string]::IsNullOrWhiteSpace($env:MAIL_USERNAME) -or [string]::IsNullOrWhite
 Write-Host 'Gateway: http://localhost:8080'
 Write-Host 'order-service instances: http://localhost:8104 and http://localhost:8114'
 Write-Host 'Logs: seckill-cloud\logs'
+
+# Chat fanout self-check. The chat.fanout bindings were once lost wholesale when a
+# queue argument drifted: RabbitAdmin aborted its declaration pass and every
+# cross-instance message was then dropped silently, with nothing in the logs.
+# See jmeter/ws/README.md section 7. Runs after instances register so the failure
+# surfaces at startup instead of in production.
+$fanoutCheck = Join-Path $projectRoot '..\jmeter\ws\check_fanout.py'
+if (Test-Path -LiteralPath $fanoutCheck) {
+    Start-Sleep -Seconds 5
+    & python $fanoutCheck --expected-instances $orderInstances.Count
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Chat fanout bindings are broken: users and agents on different instances will not see each other.'
+        Write-Warning 'See jmeter\ws\README.md section 7. Re-test with: python jmeter\ws\diag_relay.py'
+    }
+}

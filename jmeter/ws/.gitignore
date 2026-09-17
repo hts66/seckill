@@ -1,0 +1,4 @@
+# 压测生成物：含有效 JWT，不入库
+chat-users.csv
+chat-admins.csv
+__pycache__/
