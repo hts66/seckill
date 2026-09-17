@@ -21,3 +21,12 @@
 /jmeter/staged-results/
 /jmeter/report*/
 *.log
+
+# 重构期的本地备份：src.bak 的内容已在 8bc5b43 历史里，target.bak 是构建产物
+/src.bak/
+/target.bak/
+/pom.xml.bak
+
+# Trae 编辑器状态，但保留其中的设计文档
+/.trae/*
+!/.trae/documents

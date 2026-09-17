@@ -1,5 +1,6 @@
 package com.example.seckill.cloud.order;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /** 客服聊天相关的数据传输对象。 */
@@ -9,6 +10,14 @@ public final class ChatDtos {
     /** 一条聊天消息（时间已在 SQL 里格式化为字符串，避免前端处理 LocalDateTime 数组）。 */
     public record ChatMessage(Long id, Long conversationId, Long senderId, Integer senderType,
                               String content, String createdAt) {}
+
+    /** 已生成雪花 ID、等待异步批量落库的消息（同时持有内存视图与入库所需字段）。 */
+    public record PendingMessage(long id, long conversationId, long senderId, int senderType,
+                                String content, LocalDateTime createdAt) {
+        public ChatMessage toView(String formattedTime) {
+            return new ChatMessage(id, conversationId, senderId, senderType, content, formattedTime);
+        }
+    }
 
     /** 会话列表项。 */
     public record Conversation(Long id, String orderNo, Long userId, String userEmail,

@@ -1,11 +1,11 @@
 package com.example.seckill.cloud.order;
 
 import com.example.seckill.cloud.api.*;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -17,21 +17,17 @@ import java.util.UUID;
 @Service
 public class OrderEventConsumer {
     private static final Logger log = LoggerFactory.getLogger(OrderEventConsumer.class);
-    private static final String STOCK = "seckill:stock:";
-    private static final String USERS = "seckill:users:";
     private final JdbcClient jdbc;
     private final StringRedisTemplate redis;
-    private final DefaultRedisScript<Long> compensateScript = new DefaultRedisScript<>("""
-            if redis.call('SREM', KEYS[2], ARGV[1]) == 1 then
-              redis.call('INCR', KEYS[1])
-            end
-            redis.call('SET', KEYS[3], 'FAILED:' .. ARGV[2], 'EX', 7200)
-            return 1
-            """, Long.class);
+    private final RabbitTemplate rabbit;
+    private final StockReleaser stockReleaser;
 
-    public OrderEventConsumer(JdbcClient jdbc, StringRedisTemplate redis) {
+    public OrderEventConsumer(JdbcClient jdbc, StringRedisTemplate redis,
+                              RabbitTemplate rabbit, StockReleaser stockReleaser) {
         this.jdbc = jdbc;
         this.redis = redis;
+        this.rabbit = rabbit;
+        this.stockReleaser = stockReleaser;
     }
 
     @RabbitListener(queues = RabbitTopology.ORDER_QUEUE)
@@ -65,6 +61,7 @@ public class OrderEventConsumer {
                 // 单条 INSERT 已提交后再发布 SUCCESS；若 Redis 暂时异常，抛出让 RabbitMQ 重投，
                 // 下次会通过 eventId 找到已有订单并恢复结果，不会重复扣减或重复建单。
                 markSuccess(resultKey, orderNo);
+                scheduleAutoClose(orderNo, event.userId(), event.itemId());
                 log.info("Seckill order created eventId={}, orderNo={}", event.eventId(), orderNo);
                 return;
             } catch (DuplicateKeyException duplicate) {
@@ -110,9 +107,18 @@ public class OrderEventConsumer {
     }
 
     private void compensate(SeckillOrderCreatedEvent event, String resultKey, String reason) {
-        redis.execute(compensateScript,
-                List.of(STOCK + event.itemId(), USERS + event.itemId(), resultKey),
-                event.userId().toString(), reason);
+        stockReleaser.release(event.itemId(), event.userId());
+        redis.opsForValue().set(resultKey, "FAILED:" + reason, Duration.ofHours(2));
+    }
+
+    /** 建单后投递超时关单延迟消息（默认交换机按队列名路由）；发送失败不影响下单，有定时扫表兜底。 */
+    private void scheduleAutoClose(String orderNo, Long userId, Long itemId) {
+        try {
+            rabbit.convertAndSend("", RabbitTopology.CLOSE_DELAY_QUEUE,
+                    new OrderCloseMessage(orderNo, userId, itemId));
+        } catch (RuntimeException e) {
+            log.warn("schedule auto-close failed orderNo={}: {}", orderNo, e.toString());
+        }
     }
 
     private record ExistingOrder(String orderNo) {}

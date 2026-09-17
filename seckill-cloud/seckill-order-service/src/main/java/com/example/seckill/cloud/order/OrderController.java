@@ -21,32 +21,33 @@ import java.util.Map;
 @RestController
 public class OrderController {
     private static final String ORDER_COLUMNS = "id,order_no,user_id,item_id,amount,status,fulfillment_status,created_at," +
-            "address_id,receiver_name,receiver_phone,receiver_province,receiver_city,receiver_district,receiver_detail,shipping_time";
+            "address_id,receiver_name,receiver_phone,receiver_province,receiver_city,receiver_district,receiver_detail,shipping_time,finish_time";
     private final JdbcClient jdbc;
-    private final PaymentService payments;
+    private final OrderLifecycleService lifecycle;
 
-    public OrderController(JdbcClient jdbc, PaymentService payments) {
+    public OrderController(JdbcClient jdbc, OrderLifecycleService lifecycle) {
         this.jdbc = jdbc;
-        this.payments = payments;
+        this.lifecycle = lifecycle;
     }
 
     public record OrderView(Long id, String orderNo, Long userId, Long itemId, BigDecimal amount,
                             Integer status, Integer fulfillmentStatus, LocalDateTime createdAt, Long addressId, String receiverName,
                             String receiverPhone, String receiverProvince, String receiverCity,
-                            String receiverDistrict, String receiverDetail, LocalDateTime shippingTime) {}
+                            String receiverDistrict, String receiverDetail, LocalDateTime shippingTime,
+                            LocalDateTime finishTime) {}
 
     public record AdminOrderView(Long id, String orderNo, Long userId, String buyerName,
                                  String buyerEmail, Long itemId, String productName, BigDecimal amount,
                                  Integer status, Integer fulfillmentStatus, LocalDateTime createdAt,
                                  String receiverName, String receiverPhone, String receiverProvince,
                                  String receiverCity, String receiverDistrict, String receiverDetail,
-                                 LocalDateTime shippingTime) {}
+                                 LocalDateTime shippingTime, LocalDateTime finishTime) {}
 
     public record AdminOrderDetailView(Long id, String orderNo, Long userId, String buyerName,
                                        String buyerEmail, Long itemId, String productName, String productTitle,
                                        BigDecimal amount, Integer status, Integer fulfillmentStatus,
                                        LocalDateTime createdAt, LocalDateTime payTime, LocalDateTime cancelTime,
-                                       LocalDateTime shippingTime, String receiverName, String receiverPhone,
+                                       LocalDateTime shippingTime, LocalDateTime finishTime, String receiverName, String receiverPhone,
                                        String receiverProvince, String receiverCity, String receiverDistrict,
                                        String receiverDetail) {}
 
@@ -93,11 +94,18 @@ public class OrderController {
         return one(orderNo, request);
     }
 
-    /** 待支付直接取消；已支付未发货按模拟退款处理。 */
+    /** 待支付直接取消（回补库存）；已支付未发货则零钱原路退款。 */
     @PostMapping("/api/orders/cancel/{orderNo}")
     ApiResponse<String> cancel(@PathVariable String orderNo, HttpServletRequest request) {
         Long userId = RequestUser.require(request).id();
-        return ApiResponse.ok(payments.cancelOrRefund(userId, orderNo), null);
+        return ApiResponse.ok(lifecycle.cancelByUser(userId, orderNo), null);
+    }
+
+    /** 确认收货：已发货订单流转到已完成终态。 */
+    @PostMapping("/api/orders/{orderNo}/confirm")
+    ApiResponse<Void> confirmReceipt(@PathVariable String orderNo, HttpServletRequest request) {
+        lifecycle.confirmReceipt(RequestUser.require(request).id(), orderNo);
+        return ApiResponse.ok("确认收货成功", null);
     }
 
     @GetMapping("/api/admin/orders")
@@ -127,7 +135,7 @@ public class OrderController {
         String columns = "o.id,o.order_no,o.user_id,COALESCE(u.username,'未知用户') buyer_name,u.email buyer_email," +
                 "o.item_id,i.product_name,o.amount,o.status,o.fulfillment_status,o.created_at," +
                 "o.receiver_name,o.receiver_phone,o.receiver_province,o.receiver_city,o.receiver_district," +
-                "o.receiver_detail,o.shipping_time";
+                "o.receiver_detail,o.shipping_time,o.finish_time";
 
         long total = jdbc.sql("SELECT COUNT(*)" + base + where).params(params).query(Long.class).single();
         Map<String, Object> listParams = new HashMap<>(params);
@@ -143,7 +151,7 @@ public class OrderController {
         RequestUser.require(request).requireAdmin();
         return ApiResponse.ok(jdbc.sql("SELECT o.id,o.order_no,o.user_id,COALESCE(u.username,'未知用户') buyer_name,u.email buyer_email," +
                         "o.item_id,i.product_name,i.product_title,o.amount,o.status,o.fulfillment_status," +
-                        "o.created_at,o.pay_time,o.cancel_time,o.shipping_time," +
+                        "o.created_at,o.pay_time,o.cancel_time,o.shipping_time,o.finish_time," +
                         "o.receiver_name,o.receiver_phone,o.receiver_province,o.receiver_city,o.receiver_district,o.receiver_detail " +
                         "FROM seckill_orders o" +
                         " LEFT JOIN seckill_auth.users u ON u.id=o.user_id" +
@@ -156,7 +164,7 @@ public class OrderController {
     @PostMapping("/api/admin/orders/{orderNo}/cancel")
     ApiResponse<String> adminCancel(@PathVariable String orderNo, HttpServletRequest request) {
         RequestUser.require(request).requireAdmin();
-        return ApiResponse.ok(payments.adminCancelOrRefund(orderNo), null);
+        return ApiResponse.ok(lifecycle.cancelByAdmin(orderNo), null);
     }
 
     @PostMapping("/api/admin/orders/{orderNo}/ship")

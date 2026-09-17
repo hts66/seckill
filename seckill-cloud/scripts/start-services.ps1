@@ -100,10 +100,10 @@ $services = @(
     'seckill-auth-service',
     'seckill-product-service',
     'seckill-activity-service',
-    'seckill-order-service',
     'seckill-gateway'
 )
 
+# Single-instance services.
 foreach ($service in $services) {
     $pidFile = Join-Path $pidDirectory "$service.pid"
     if (Test-Path -LiteralPath $pidFile) {
@@ -129,8 +129,50 @@ foreach ($service in $services) {
     Write-Host "$service started. PID=$($process.Id)"
 }
 
+# order-service runs two instances for the L2 chat fanout horizontal-scaling setup.
+# Each instance needs a unique HTTP port, chat instance-id and snowflake worker-id.
+$orderService = 'seckill-order-service'
+$orderJar = Join-Path $projectRoot "$orderService\target\$orderService-1.0.0.jar"
+if (-not (Test-Path -LiteralPath $orderJar)) {
+    throw "Missing $orderJar. Run mvn -DskipTests package in seckill-cloud first."
+}
+$orderInstances = @(
+    @{ Name = $orderService;       Port = '8104'; ChatInstance = 'node8104'; WorkerId = '0' }
+    @{ Name = "$orderService-2";   Port = '8114'; ChatInstance = 'node8114'; WorkerId = '1' }
+)
+foreach ($inst in $orderInstances) {
+    $name = $inst.Name
+    $pidFile = Join-Path $pidDirectory "$name.pid"
+    if (Test-Path -LiteralPath $pidFile) {
+        $oldPid = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue
+        if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$oldPid" -ErrorAction SilentlyContinue).CommandLine
+            if ($commandLine -and $commandLine.Contains("$orderService-1.0.0.jar") -and
+                    $commandLine.Contains("--server.port=$($inst.Port)")) {
+                Write-Host "$name is already running on port $($inst.Port). PID=$oldPid"
+                continue
+            }
+        }
+    }
+    $stdout = Join-Path $logs "$name.out.log"
+    $stderr = Join-Path $logs "$name.err.log"
+    $jvmArgs = @(
+        "-Dcsp.sentinel.log.dir=$sentinelLogs",
+        '-jar', $orderJar,
+        "--server.port=$($inst.Port)",
+        "--app.chat.instance-id=$($inst.ChatInstance)",
+        "--app.chat.worker-id=$($inst.WorkerId)"
+    )
+    $process = Start-Process -FilePath 'java' -ArgumentList $jvmArgs `
+        -WorkingDirectory $projectRoot -RedirectStandardOutput $stdout `
+        -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    $process.Id | Set-Content -LiteralPath $pidFile
+    Write-Host "$name started on port $($inst.Port). PID=$($process.Id)"
+}
+
 if ([string]::IsNullOrWhiteSpace($env:MAIL_USERNAME) -or [string]::IsNullOrWhiteSpace($env:MAIL_PASSWORD)) {
     Write-Warning 'MAIL_USERNAME or MAIL_PASSWORD is empty. Sending email codes will fail.'
 }
 Write-Host 'Gateway: http://localhost:8080'
+Write-Host 'order-service instances: http://localhost:8104 and http://localhost:8114'
 Write-Host 'Logs: seckill-cloud\logs'

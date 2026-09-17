@@ -29,6 +29,13 @@ spring:
       max-concurrency: ${MQ_MAX_CONCURRENCY:16}
       prefetch: 50
 security.internal-token: ${INTERNAL_TOKEN:}
+# 订单超时：待支付超过该秒数自动关单并回补秒杀库存（MQ 延迟队列 + 定时扫表双保险）
+app.order:
+  pay-timeout-seconds: ${ORDER_PAY_TIMEOUT:900}
+# 虚拟零钱钱包（演示环境替代真实支付，用户可在订单页自行设置余额）
+app.wallet:
+  init-balance: ${WALLET_INIT_BALANCE:10000.00}
+  max-balance: ${WALLET_MAX_BALANCE:99999999.99}
 app.alipay:
   enabled: ${ALIPAY_ENABLED:false}
   app-id: ${ALIPAY_APP_ID:}
@@ -37,4 +44,20 @@ app.alipay:
   gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}
   notify-url: ${ALIPAY_NOTIFY_URL:http://localhost:8080/api/payments/alipay/notify}
   return-url: ${ALIPAY_RETURN_URL:http://localhost:5173/orders?payReturn=1}
+# 实时聊天 L1 高并发参数
+app.chat:
+  # 实例标识：多实例部署建议显式指定（K8s 注入 Pod 名），不填进程随机；用于 fanout 去重
+  instance-id: ${CHAT_INSTANCE_ID:}
+  # 多实例部署时每个 order-service 实例必须配置不同的 worker-id（0~31），不填随机
+  worker-id: ${CHAT_WORKER_ID:-1}
+  # 单账号同时在线连接上限（手机+电脑等多端够用）
+  max-connections-per-user: ${CHAT_MAX_CONN:4}
+  # 单用户每秒最多发送消息数
+  message-rate-per-second: ${CHAT_MSG_RATE:5}
+  # 消息异步落库：刷盘间隔与有界队列容量（背压保护）
+  flush-interval-ms: ${CHAT_FLUSH_MS:200}
+  queue-capacity: ${CHAT_QUEUE:10000}
+  # 心跳空闲超时与扫描间隔
+  idle-timeout-seconds: ${CHAT_IDLE_TIMEOUT:90}
+  idle-scan-ms: 30000
 management.endpoints.web.exposure.include: health,info

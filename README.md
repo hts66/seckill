@@ -1,6 +1,6 @@
 # 秒杀商城系统
 
-基于 Spring Boot、Spring Cloud、Vue 3 和 Redis 的高并发秒杀商城，包含单体版与微服务版。系统支持商品管理、秒杀活动、异步下单、订单管理、收货地址、MinIO 图片上传和 AI 智能客服。
+基于 Spring Cloud、Vue 3 和 Redis 的高并发秒杀商城。系统支持商品管理、秒杀活动、异步下单、订单管理、收货地址、MinIO 图片上传和 AI 智能客服。
 
 ## 项目亮点
 
@@ -54,7 +54,6 @@ Vue 3 前端 -> Gateway :8080 -> Auth :8101
 ## 目录结构
 
 ```text
-src/                         Spring Boot 单体版
 seckill-frontend/            Vue 3 前端
 seckill-cloud/               Spring Cloud 微服务版
   seckill-gateway/           网关和 JWT 校验
@@ -64,7 +63,7 @@ seckill-cloud/               Spring Cloud 微服务版
   seckill-order-service/     订单和 MQ 消费
   ai-service/                FastAPI AI 客服
   sql/                       微服务数据库脚本
-sql/                         单体数据库脚本
+sql/                         单体数据库脚本（已废弃，仅作历史归档）
 ```
 
 ## 环境要求
@@ -105,27 +104,9 @@ npm install
 npm run dev
 ```
 
-前端默认访问微服务网关 `http://localhost:8080`。切换到单体后端：
-
-```powershell
-$env:VITE_API_TARGET = 'http://localhost:8081'
-npm run dev
-```
+前端默认访问微服务网关 `http://localhost:8080`。
 
 构建：`npm run build`；预览：`npm run preview`。
-
-## 单体版启动
-
-根目录 `.env.example` 复制为 `.env` 后，单体配置会自动读取该文件：
-
-```powershell
-cd C:\Users\27036\Desktop\seckill
-Copy-Item .env.example .env
-notepad .env
-mvn spring-boot:run
-```
-
-单体版端口为 `8081`，数据库脚本在 `sql/`。
 
 ## 常用地址
 
@@ -137,7 +118,6 @@ mvn spring-boot:run
 | Nacos | <http://localhost:8848/nacos> |
 | RabbitMQ 管理台 | <http://localhost:15673> |
 | MinIO 控制台 | <http://localhost:9011> |
-| 单体后端 | <http://localhost:8081> |
 
 ## 数据库与 AI
 

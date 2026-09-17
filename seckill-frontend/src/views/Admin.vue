@@ -331,7 +331,7 @@ async function doShipOrder(orderNo) {
 }
 
 async function doCancelOrder(orderNo) {
-  if (!confirm('确认取消该订单吗？已支付订单将直接退款（模拟）。')) return
+  if (!confirm('确认取消该订单吗？已支付订单将退款到用户零钱。')) return
   try {
     await cancelAdminOrder(orderNo)
     await queryOrders()

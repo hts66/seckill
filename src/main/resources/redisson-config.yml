@@ -1,5 +1,0 @@
-singleServerConfig:
-  address: "${REDIS_ADDRESS:redis://localhost:6379}"
-  password: "${REDIS_PASSWORD:}"
-  connectionPoolSize: 50
-  connectionMinimumIdleSize: 10
