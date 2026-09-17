@@ -61,6 +61,10 @@ class Results:
         self.messages_sent = 0
         self.messages_received = 0
         self.disconnects = 0
+        # 背景连接压力：只挂着收消息、不发消息，用来复现"高并发连接下"的投递
+        self.idle_connected = 0
+        self.idle_failed = 0
+        self.idle_disconnects = 0
         # marker -> 发送时刻（user 与 admin 协程共享，用于算端到端延迟）
         self.pending: dict[str, float] = {}
         self.relay_seen: set[str] = set()
@@ -91,11 +95,26 @@ def ws_url(host: str, port: int, token: str) -> str:
     return f"ws://{host}:{port}/ws/chat?token={token}"
 
 
-async def open_chat(base: str, token: str, results: Results):
+def instance_headers(user: dict, role: int, token: str) -> dict:
+    """直连实例时用：网关本来注入的就是这几个头，绕过网关就得自己带。
+
+    这是精确控制"连接落在哪个实例"的唯一办法——经网关时由 LoadBalancer 决定，
+    客户端无从得知，只能靠延迟阈值去猜。
+    """
+    return {
+        "X-Internal-Token": token,
+        "X-User-Id": str(user["userId"]),
+        "X-User-Role": str(role),
+        "X-User-Email": user.get("email") or f"u{user['userId']}@t.local",
+    }
+
+
+async def open_chat(base: str, token: str, results: Results, headers: dict | None = None):
     """建连并等到 connected 帧；返回 (websocket, 握手毫秒)。失败抛异常。"""
     started = time.perf_counter()
     ws = await websockets.connect(
         ws_url(*base, token),
+        additional_headers=headers,
         max_size=2 ** 20,
         open_timeout=15,
         close_timeout=3,
@@ -165,6 +184,33 @@ async def heartbeat(ws, stop: asyncio.Event) -> None:
             return
 
 
+async def idle_holder(base, user, results, stop, headers=None):
+    """背景连接：只建连 + 保活 + 收帧，从不发言。
+
+    用来制造"高并发连接数"这个压力条件——服务端每条连接要占一个 session、
+    一个房间集合、一个 decorator 和一个 lastActive 表项，连接数本身就是负载。
+    """
+    try:
+        ws, hs = await open_chat(base, user["token"], results, headers)
+    except Exception as exc:
+        results.idle_failed += 1
+        results.fail(f"idle-connect:{type(exc).__name__}")
+        return
+    results.idle_connected += 1
+    results.handshake.append(hs)
+    hb = asyncio.create_task(heartbeat(ws, stop))
+    consumer = asyncio.create_task(consume(ws, results, False, stop))
+    try:
+        await stop.wait()
+    finally:
+        hb.cancel()
+        consumer.cancel()
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
 async def user_connect_only(base, user, results, args, stop, started_at):
     try:
         ws, hs = await open_chat(base, user["token"], results)
@@ -183,10 +229,10 @@ async def user_connect_only(base, user, results, args, stop, started_at):
         await ws.close()
 
 
-async def user_chat(base, user, index, results, args, stop, admin_convs=None):
+async def user_chat(base, user, index, results, args, stop, admin_convs=None, headers=None):
     """连上 -> 预热建会话（relay 需要）-> 按速率发言。"""
     try:
-        ws, hs = await open_chat(base, user["token"], results)
+        ws, hs = await open_chat(base, user["token"], results, headers)
     except Exception as exc:
         results.connect_failed += 1
         results.fail(f"connect:{type(exc).__name__}")
@@ -246,9 +292,9 @@ async def user_chat(base, user, index, results, args, stop, admin_convs=None):
             pass
 
 
-async def admin_subscriber(base, admin, convs, results, stop, ready: asyncio.Event):
+async def admin_subscriber(base, admin, convs, results, stop, ready: asyncio.Event, headers=None):
     try:
-        ws, hs = await open_chat(base, admin["token"], results)
+        ws, hs = await open_chat(base, admin["token"], results, headers)
     except Exception as exc:
         results.connect_failed += 1
         results.fail(f"admin-connect:{type(exc).__name__}")
@@ -273,9 +319,10 @@ async def admin_subscriber(base, admin, convs, results, stop, ready: asyncio.Eve
 async def run(args) -> Results:
     results = Results()
     base = (args.host, args.port)
-    users = load_csv(Path(args.users_file), need_order=args.scenario in ("echo", "relay"))[: args.users]
+    all_users = load_csv(Path(args.users_file), need_order=args.scenario in ("echo", "relay"))
+    users = all_users[: args.users]
     if len(users) < args.users:
-        raise SystemExit(f"用户文件只有 {len(users)} 个，不够 {args.users} 个并发用户")
+        raise SystemExit(f"用户文件只有 {len(all_users)} 个，不够 {args.users} 个并发用户")
 
     stop = asyncio.Event()
     started_at = time.perf_counter()
@@ -307,10 +354,26 @@ async def run(args) -> Results:
         await asyncio.gather(*tasks, return_exceptions=True)
         return results
 
-    # relay：先让用户建好会话，再让客服订阅，然后才开始计时
+    # ---- relay：先让用户建好会话，再让客服订阅，然后才开始计时 ----
+    #
+    # 同实例 / 跨实例由连接落在哪个实例决定：
+    #   gateway 模式 —— 由网关 LoadBalancer 决定，客户端不知道，只能按延迟阈值猜；
+    #   direct  模式 —— 自己指定端口，分类是**真值**，才是严谨的对照实验。
+    direct = args.mode == "direct"
+    sender_base = (args.host, args.sender_port) if direct else base
+    admin_base = (args.host, args.admin_port) if direct else base
+    idle_base = (args.host, args.idle_port) if direct else base
+
+    def u_headers(user):
+        return instance_headers(user, 0, args.internal_token) if direct else None
+
+    def a_headers(admin):
+        return instance_headers(admin, 1, args.internal_token) if direct else None
+
     convs: list[int] = []
-    warm_tasks = [asyncio.create_task(user_chat(base, u, i, results, args, stop, admin_convs=convs))
-                  for i, u in enumerate(users)]
+    warm_tasks = [asyncio.create_task(
+        user_chat(sender_base, u, i, results, args, stop, admin_convs=convs, headers=u_headers(u)))
+        for i, u in enumerate(users)]
     # 等所有用户都拿到 conversationId（或超时）
     for _ in range(200):
         if len(convs) >= len(users):
@@ -321,31 +384,57 @@ async def run(args) -> Results:
     if not convs:
         raise SystemExit("预热阶段没有建出任何会话，检查订单号是否有效")
 
-    print(f"预热完成：{len(convs)}/{len(users)} 个会话，客服开始订阅…")
+    print(f"预热完成：{len(convs)}/{len(users)} 个会话")
+
+    # 重置统计，把预热期的数据丢掉
     results.handshake.clear()
     results.errors.clear()
     results.disconnects = 0
 
     stop = asyncio.Event()
     started_at = time.perf_counter()
+    idle_tasks = []
+
+    # 背景连接压力：在测量开始前就把它们挂上去，保持稳态
+    if args.idle:
+        # 关键：空闲连接要用**没被发言占用**的用户，否则会把发言用户的 4 条连接额度吃满，
+        # 导致发言连接被服务端以"连接数过多"拒绝，整个测量作废。
+        pool = all_users[args.users:] or all_users
+        idle_plan = []
+        for i in range(args.idle):
+            slot = i // len(pool)
+            if slot >= SERVER_MAX_CONN_PER_USER:
+                print(f"[警告] --idle {args.idle} 需要每用户 {slot + 1} 条连接，"
+                      f"超过上限 {SERVER_MAX_CONN_PER_USER}；"
+                      f"当前用户池 {len(pool)} 个，实际最多 {len(pool) * SERVER_MAX_CONN_PER_USER} 条")
+                break
+            idle_plan.append(pool[i % len(pool)])
+        print(f"建立 {len(idle_plan)} 条背景空闲连接（用户池 {len(pool)} 个，"
+              f"与发言用户不重叠）…")
+        for user in idle_plan:
+            if args.ramp:
+                await asyncio.sleep(args.ramp / max(1, len(idle_plan)))
+            idle_tasks.append(asyncio.create_task(
+                idle_holder(idle_base, user, results, stop, u_headers(user))))
+
     ready = asyncio.Event()
     admins = load_csv(Path(args.admins_file), need_order=False)[: args.admins]
-    # 每个客服分摊全部会话
     admin_tasks = []
     for i, admin in enumerate(admins):
         share = convs[i::len(admins)]
         admin_tasks.append(asyncio.create_task(
-            admin_subscriber(base, admin, share, results, stop, ready)))
+            admin_subscriber(admin_base, admin, share, results, stop, ready, a_headers(admin))))
     await ready.wait()
     await asyncio.sleep(2)  # 等 subscribe 帧被服务端处理完
 
     for index, user in enumerate(users):
         if args.ramp:
             await asyncio.sleep(args.ramp / len(users))
-        tasks.append(asyncio.create_task(user_chat(base, user, index, results, args, stop)))
+        tasks.append(asyncio.create_task(
+            user_chat(sender_base, user, index, results, args, stop, headers=u_headers(user))))
     await asyncio.gather(*tasks, return_exceptions=True)
     stop.set()
-    await asyncio.gather(*admin_tasks, return_exceptions=True)
+    await asyncio.gather(*admin_tasks, *idle_tasks, return_exceptions=True)
     return results
 
 
@@ -355,6 +444,9 @@ def report(results: Results, args, elapsed: float) -> None:
     print(f"{'=' * 62}")
     print(f"建连成功 {len(results.handshake)}   失败 {results.connect_failed}   "
           f"中途掉线 {results.disconnects}")
+    if args.idle:
+        print(f"背景空闲连接 {results.idle_connected}/{args.idle}（失败 {results.idle_failed}）"
+              f"  ← 测量期间的并发连接压力")
     print(f"发出 {results.messages_sent} 条   收到 {results.messages_received} 条")
 
     if results.handshake:
@@ -374,11 +466,19 @@ def report(results: Results, args, elapsed: float) -> None:
         fast = [x for x in r if x < args.split_ms]
         slow = [x for x in r if x >= args.split_ms]
         total = len(r) or 1
-        print(f"  ├ 同实例(本地广播) {len(fast):>5} 条 {len(fast)/total*100:5.1f}%  "
+        if args.mode == "direct":
+            same = args.sender_port == args.admin_port
+            head = "同实例" if same else "跨实例"
+            print(f"  [{args.mode}] 发言连 {args.sender_port} / 客服连 {args.admin_port} "
+                  f"→ 该链路是**{head}**（端口确定，非推断）")
+        print(f"  ├ <{args.split_ms:.0f}ms     {len(fast):>5} 条 {len(fast)/total*100:5.1f}%  "
               f"p50={percentile(fast, 50):.1f}ms  p95={percentile(fast, 95):.1f}ms")
-        print(f"  └ 跨实例(MQ 扇出)  {len(slow):>5} 条 {len(slow)/total*100:5.1f}%  "
+        print(f"  └ >={args.split_ms:.0f}ms    {len(slow):>5} 条 {len(slow)/total*100:5.1f}%  "
               f"p50={percentile(slow, 50):.1f}ms  p95={percentile(slow, 95):.1f}ms")
-        print(f"     拆分阈值 {args.split_ms:.0f}ms；跨实例那组的 p50 逼近 MQ 扇出间隔属正常")
+        print(f"     注意：这个阈值分组只是**分布展示**，不能当同/跨实例的判据——"
+              f"跨实例消息若刚好赶在 flush 前到达，同样能落在 {args.split_ms:.0f}ms 以内。")
+        if args.mode == "gateway":
+            print(f"     gateway 模式要分同/跨实例做对照实验，请改用 --mode direct 固定端口。")
     if results.messages_sent and results.echo:
         print(f"消息吞吐   {len(results.echo) / elapsed:.1f} 条/秒（按回显计）")
     if results.errors:
@@ -404,8 +504,18 @@ def main() -> None:
     parser.add_argument("--ramp", type=float, default=10, help="建连/启动的爬坡时长(秒)")
     parser.add_argument("--split-ms", type=float, default=100,
                         help="双峰拆分阈值：低于此值算同实例投递，高于算跨实例扇出")
+    parser.add_argument("--idle", type=int, default=0,
+                        help="背景空闲连接数：只挂连接不发消息，用来制造高并发连接压力")
+    parser.add_argument("--mode", choices=["gateway", "direct"], default="gateway",
+                        help="gateway=经网关(同/跨实例由 LB 决定，只能猜)；"
+                             "direct=直连指定实例(同/跨实例是确定的，适合做对照)")
+    parser.add_argument("--sender-port", type=int, default=8104, help="direct 模式下发言用户连的实例")
+    parser.add_argument("--admin-port", type=int, default=8114, help="direct 模式下客服连的实例")
+    parser.add_argument("--idle-port", type=int, default=8104, help="direct 模式下空闲连接连的实例")
+    parser.add_argument("--internal-token", default="local-dev-internal-token-change-in-production",
+                        help="direct 模式绕开网关，需要自己带 X-Internal-Token")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8080, help="8080=经网关，8104=直连 order-service")
+    parser.add_argument("--port", type=int, default=8080, help="gateway 模式的端口；8080=网关")
     args = parser.parse_args()
 
     if args.rate > SERVER_RATE_LIMIT:
